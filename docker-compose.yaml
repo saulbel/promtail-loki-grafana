@@ -1,0 +1,69 @@
+version: '3.9'
+
+services:
+  grafana:
+    image: grafana/grafana-oss:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./provisioning:/etc/grafana/provisioning
+
+  loki:
+    image: grafana/loki:latest
+    container_name: loki
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yaml:/etc/loki/loki-config.yaml
+      - ./rules.yml:/etc/loki/rulestorage/fake/rules.yml
+    entrypoint:
+     - /usr/bin/loki
+     - -config.file=/etc/loki/loki-config.yaml
+    depends_on:
+     - alertmanager
+  
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - /var/log:/var/log
+      - ./promtail-config.yaml:/etc/promtail/promtail-config.yaml
+    command:
+      - '--config.file=/etc/promtail/promtail-config.yaml'
+
+  alertmanager:
+    image: prom/alertmanager:latest
+    container_name: alertmanager
+    volumes:
+      - ./alertmanager-config.yaml:/etc/alertmanager/alertmanager-config.yaml
+    command:
+      - '--config.file=/etc/alertmanager/alertmanager-config.yaml'
+      - '--storage.path=/alertmanager'
+    ports:
+      - 9093:9093
+
+  webservice:
+    image: nginx
+    container_name: webservice
+    ports:
+      - 8000:80
+    logging:
+      driver: loki
+      options:
+        loki-url: http://localhost:3100/loki/api/v1/push
+        loki-external-labels: job=dockerlogs
+    depends_on:
+      - loki
+
+  http-client:
+    image: alpine
+    container_name: http-client
+    entrypoint: |
+      sh -c 'sh -s << EOF
+      apk --no-cache add curl
+      while true
+        do
+          curl http://webservice
+        done
+      EOF'
+    depends_on:
+      - webservice
